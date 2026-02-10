@@ -1,0 +1,105 @@
+{
+  "name": "RAG - Ingestion des avis Amazon",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "start",
+      "name": "Start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "filePath": "/home/node/data/reviews_clean.json"
+      },
+      "id": "read-json",
+      "name": "Lire les avis JSON",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "items",
+        "options": {
+          "reset": true
+        }
+      },
+      "id": "split-items",
+      "name": "Séparer chaque avis",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/embeddings",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "nomic-embed-text"
+            },
+            {
+              "name": "prompt",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "generate-embedding",
+      "name": "Générer embedding (Ollama)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://qdrant:6333/collections/amazon_reviews/points",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"points\": [\n    {\n      \"id\": {{ $runIndex }},\n      \"vector\": {{ JSON.stringify($json.embedding) }},\n      \"payload\": {\n        \"text\": \"{{ $('Séparer chaque avis').item.json.text }}\",\n        \"rating\": {{ $('Séparer chaque avis').item.json.metadata.rating }},\n        \"product_id\": \"{{ $('Séparer chaque avis').item.json.metadata.product_id }}\",\n        \"summary\": \"{{ $('Séparer chaque avis').item.json.metadata.summary }}\"\n      }\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "store-qdrant",
+      "name": "Stocker dans Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [{ "node": "Lire les avis JSON", "type": "main", "index": 0 }]
+      ]
+    },
+    "Lire les avis JSON": {
+      "main": [
+        [{ "node": "Séparer chaque avis", "type": "main", "index": 0 }]
+      ]
+    },
+    "Séparer chaque avis": {
+      "main": [
+        [{ "node": "Générer embedding (Ollama)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Générer embedding (Ollama)": {
+      "main": [
+        [{ "node": "Stocker dans Qdrant", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "RAG" },
+    { "name": "ingestion" }
+  ]
+}

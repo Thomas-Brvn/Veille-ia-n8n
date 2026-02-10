@@ -1,0 +1,128 @@
+{
+  "name": "RAG - Chatbot Avis Amazon",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "rag-chat"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/embeddings",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "nomic-embed-text"
+            },
+            {
+              "name": "prompt",
+              "value": "={{ $json.body.question }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "embed-question",
+      "name": "Embedding de la question",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://qdrant:6333/collections/amazon_reviews/points/search",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"vector\": {{ JSON.stringify($json.embedding) }},\n  \"limit\": 5,\n  \"with_payload\": true\n}",
+        "options": {}
+      },
+      "id": "search-qdrant",
+      "name": "Recherche dans Qdrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.first().json.result;\nconst question = $('Webhook Chat').first().json.body.question;\n\nconst context = results.map((r, i) => \n  `[Avis ${i + 1}] (Note: ${r.payload.rating}/5)\\n${r.payload.text}`\n).join('\\n\\n---\\n\\n');\n\nconst prompt = `Tu es un assistant spécialisé dans l'analyse d'avis clients Amazon.\nRéponds à la question de l'utilisateur en te basant UNIQUEMENT sur les avis ci-dessous.\nSi les avis ne contiennent pas l'information, dis-le honnêtement.\nRéponds en français.\n\n--- AVIS CLIENTS ---\n${context}\n--- FIN DES AVIS ---\n\nQuestion : ${question}\n\nRéponse :`;\n\nreturn [{ json: { prompt } }];"
+      },
+      "id": "build-prompt",
+      "name": "Construire le prompt RAG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama3.2\",\n  \"prompt\": {{ JSON.stringify($json.prompt) }},\n  \"stream\": false\n}",
+        "options": {}
+      },
+      "id": "llm-generate",
+      "name": "Générer réponse (Llama 3.2)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json.response;\nconst question = $('Webhook Chat').first().json.body.question;\n\nreturn [{\n  json: {\n    question,\n    answer: response,\n    model: 'llama3.2',\n    sources_count: $('Recherche dans Qdrant').first().json.result.length\n  }\n}];"
+      },
+      "id": "format-response",
+      "name": "Formater la réponse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Webhook Chat": {
+      "main": [
+        [{ "node": "Embedding de la question", "type": "main", "index": 0 }]
+      ]
+    },
+    "Embedding de la question": {
+      "main": [
+        [{ "node": "Recherche dans Qdrant", "type": "main", "index": 0 }]
+      ]
+    },
+    "Recherche dans Qdrant": {
+      "main": [
+        [{ "node": "Construire le prompt RAG", "type": "main", "index": 0 }]
+      ]
+    },
+    "Construire le prompt RAG": {
+      "main": [
+        [{ "node": "Générer réponse (Llama 3.2)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Générer réponse (Llama 3.2)": {
+      "main": [
+        [{ "node": "Formater la réponse", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "RAG" },
+    { "name": "chatbot" }
+  ]
+}
